@@ -37,10 +37,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define timeout_expired(start, len) ((HAL_GetTick() - (start)) >= (len))
+#define TIMEOUT "TIMEOUT!"
 uint32_t local_time, sensor_time;
-float distance;
 const float speedOfSound = 0.0343/2;
 uint8_t buff[10];
+uint32_t distance, local_time;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -71,7 +73,7 @@ osThreadId_t myBtnHandle;
 const osThreadAttr_t myBtn_attributes = {
   .name = "myBtn",
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 128
+  .stack_size = 712
 };
 /* Definitions for rtosTimer1 */
 osTimerId_t rtosTimer1Handle;
@@ -194,16 +196,12 @@ void StartBtnTask(void *argument)
   for(;;)
   {
 	  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_14);
-	  //sensor_time = hcsr04_read();
-	  //distance  = 2.8*sensor_time* speedOfSound;
-	  //uint32_t distance_in_mm = distance *10;
-	  uint32_t distance_in_mm = 44;
-	  int_to_char_arr(distance_in_mm, buff);
+	  uint32_t distance  = hcsr04_read();
+	  memset(buff, 0, sizeof buff);
+	  int_to_char_arr(distance, buff);
 
-	  //HAL_UART_Transmit_IT(&huart1, buff, strlen(buff));
+	  HAL_UART_Transmit_IT(&huart1, buff, strlen(buff));
 	  CDC_Transmit_FS(buff, strlen(buff));
-	  //sprintf(buff, "%f", distance);
-	  //HAL_UART_Transmit_IT(&huart1, buff, 4);
 	  osDelay(1000);
   }
   /* USER CODE END StartBtnTask */
@@ -233,14 +231,25 @@ uint32_t hcsr04_read (void)
 	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);  // pull the TRIG pin low
 
 	// read the time for which the pin is high
-
-	while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET);  // wait for the ECHO pin to go high
+	int32_t start = HAL_GetTick();
+	while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET)// wait for the ECHO pin to go high
+	{
+		if (timeout_expired(start, 2000)) {
+			CDC_Transmit_FS(TIMEOUT, strlen(TIMEOUT));
+			break;
+		}
+	}
+	start = HAL_GetTick();
 	while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_SET)    // while the pin is high
 	 {
+		if (timeout_expired(start, 2000)) {
+					CDC_Transmit_FS(TIMEOUT, strlen(TIMEOUT));
+					break;
+				}
 		local_time++;   // measure time for which the pin is high
 		delay(1);
 	 }
-	return local_time;
+	return 28*local_time* speedOfSound;
 }
 
 
@@ -258,7 +267,8 @@ void int_to_char_arr(uint32_t source, uint8_t *buf)
         source = source/10;
         i++;
     }
-    reverse(buf, i);
+    if(source != 0)
+    	reverse(buf, i);
     buff[i++] = 13;
 }
 
